@@ -243,3 +243,13 @@ func (authorityService *AuthorityService) findChildrenAuthority(authority *syste
 	}
 	return err
 }
+
+// AddMenuAuthority 为角色增加menu
+func (authorityService *AuthorityService) AddMenuAuthority(auth *system.SysAuthorityMenu) error {
+	var s system.SysAuthorityMenu
+	err := global.GVA_DB.Model(&system.SysAuthorityMenu{}).
+		Where("sys_base_menu_id = ? AND sys_authority_authority_id = ?", auth.MenuId, auth.AuthorityId).
+		Attrs(system.SysAuthorityMenu{AuthorityId: auth.AuthorityId, MenuId: auth.MenuId}).
+		FirstOrCreate(&s).Error
+	return err
+}

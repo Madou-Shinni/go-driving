@@ -3,6 +3,8 @@ package system
 import (
 	"errors"
 	"fmt"
+	"github.com/flipped-aurora/gin-vue-admin/server/model/system/request"
+	"github.com/flipped-aurora/gin-vue-admin/server/plugin/wechat/pkg/tools"
 	"net/url"
 	"os"
 	"strings"
@@ -63,14 +65,16 @@ func (autoApi *AutoCodeApi) CreateTemp(c *gin.Context) {
 	}
 	a.Pretreatment()
 	var apiIds []uint
+	var apiList []system.SysApi
 	if a.AutoCreateApiToSql {
-		if ids, err := autoCodeService.AutoCreateApi(&a); err != nil {
+		if ids, list, err := autoCodeService.AutoCreateApi(&a); err != nil {
 			global.GVA_LOG.Error("自动化创建失败!请自行清空垃圾数据!", zap.Error(err))
 			c.Writer.Header().Add("success", "false")
 			c.Writer.Header().Add("msg", url.QueryEscape("自动化创建失败!请自行清空垃圾数据!"))
 			return
 		} else {
 			apiIds = ids
+			apiList = list
 		}
 	}
 	a.PackageT = utils.FirstUpper(a.Package)
@@ -79,6 +83,48 @@ func (autoApi *AutoCodeApi) CreateTemp(c *gin.Context) {
 		if errors.Is(err, system.ErrAutoMove) {
 			c.Writer.Header().Add("success", "true")
 			c.Writer.Header().Add("msg", url.QueryEscape(err.Error()))
+
+			// 扩展菜单api权限
+			// 文件名称 packageName
+			// name：路由Name path=name title：展示名称
+			userInfo := utils.GetUserInfo(c)
+			// 创建菜单
+			menu := system.SysBaseMenu{
+				MenuLevel: 0,
+				ParentId:  "0",
+				Path:      fmt.Sprintf("%sManager", a.Abbreviation),
+				Name:      fmt.Sprintf("%sManager", a.Abbreviation),
+				Hidden:    false,
+				Component: fmt.Sprintf("view/%s/%s.vue", tools.ConvertToCamelCase(a.HumpPackageName), tools.ConvertToCamelCase(a.HumpPackageName)), // 转小驼峰
+				Sort:      0,
+				Meta:      system.Meta{Title: fmt.Sprintf("%s管理", a.Description), Icon: "aim"},
+			}
+			// 添加权限
+			// 菜单权限
+			//authorityId := utils.GetUserInfo(c).AuthorityId
+			menuId, err := menuService.AddBaseMenu(menu)
+			if err != nil {
+				global.GVA_LOG.Error("menuService.AddBaseMenu", zap.Error(err))
+				return
+			}
+			err = authorityService.AddMenuAuthority(&system.SysAuthorityMenu{
+				AuthorityId: fmt.Sprintf("%d", userInfo.AuthorityId),
+				MenuId:      fmt.Sprintf("%d", menuId),
+			})
+			if err != nil {
+				global.GVA_LOG.Error("authorityService.AddMenuAuthority", zap.Error(err))
+				return
+			}
+			// api权限
+			maps := casbinService.GetPolicyPathByAuthorityId(userInfo.AuthorityId)
+			for i := range apiList {
+				maps = append(maps, request.CasbinInfo{Path: apiList[i].Path, Method: apiList[i].Method})
+			}
+			err = casbinService.UpdateCasbin(userInfo.AuthorityId, maps)
+			if err != nil {
+				global.GVA_LOG.Error("casbinService.UpdateCasbin", zap.Error(err))
+				return
+			}
 		} else {
 			c.Writer.Header().Add("success", "false")
 			c.Writer.Header().Add("msg", url.QueryEscape(err.Error()))
